@@ -1056,16 +1056,30 @@ static struct attribute *hp_wmi_attrs[] = {
 };
 ATTRIBUTE_GROUPS(hp_wmi);
 
-static void hp_wmi_notify(union acpi_object *obj, void *context)
+static void hp_wmi_notify(u32 value, void *context)
 {
+	struct acpi_buffer response = { ACPI_ALLOCATE_BUFFER, NULL };
+	union acpi_object *obj;
 	u32 event_id, event_data;
 	u32 *location;
 	int key_code;
+	acpi_status status;
 
-	if (!obj)
+	status = wmi_get_event_data(value, &response);
+	if (status != AE_OK) {
+		pr_info("bad event status 0x%x\n", status);
 		return;
+	}
+
+	obj = (union acpi_object *)response.pointer;
+
+	if (!obj) {
+		kfree(response.pointer);
+		return;
+	}
 	if (obj->type != ACPI_TYPE_BUFFER) {
 		pr_info("Unknown response received %d\n", obj->type);
+		kfree(response.pointer);
 		return;
 	}
 
@@ -1082,6 +1096,7 @@ static void hp_wmi_notify(union acpi_object *obj, void *context)
 		event_data = *(location + 2);
 	} else {
 		pr_info("Unknown buffer length %d\n", obj->buffer.length);
+		kfree(response.pointer);
 		return;
 	}
 
@@ -1183,6 +1198,7 @@ static void hp_wmi_notify(union acpi_object *obj, void *context)
 		pr_info("Unknown event_id - %d - 0x%x\n", event_id, event_data);
 		break;
 	}
+	kfree(response.pointer);
 }
 
 static int __init hp_wmi_input_setup(void)
@@ -2663,7 +2679,7 @@ static int __init hp_wmi_bios_setup(struct platform_device *device)
 	return 0;
 }
 
-static void __exit hp_wmi_bios_remove(struct platform_device *device)
+static int __exit hp_wmi_bios_remove(struct platform_device *device)
 {
 	int i;
 
@@ -2690,6 +2706,7 @@ static void __exit hp_wmi_bios_remove(struct platform_device *device)
 	if (platform_profile_support)
 		platform_profile_remove();
 #endif
+	return 0;
 }
 
 static int hp_wmi_resume_handler(struct device *device)
