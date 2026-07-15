@@ -12,6 +12,15 @@ VERSION := $(shell grep -oP 'PACKAGE_VERSION="\K[^"]+' dkms.conf)
 # Current directory
 PWD := $(shell pwd)
 
+# Build with the kernel's own compiler: clang-built kernels (CachyOS, some
+# hardened/LTO distros) reject gcc for out-of-tree modules. Detect from the
+# target kernel's config and pass LLVM=1 so kbuild uses clang/llvm.
+KCONFIG := $(firstword $(wildcard $(KDIR)/.config $(KDIR)/include/config/auto.conf))
+HPWMI_KERNEL_IS_CLANG := $(shell [ -r "$(KCONFIG)" ] && grep -q '^CONFIG_CC_IS_CLANG=y' "$(KCONFIG)" && echo 1 || echo 0)
+ifeq ($(HPWMI_KERNEL_IS_CLANG),1)
+  HPWMI_LLVM := LLVM=1
+endif
+
 # Detect compatibility APIs in kernel headers
 # WMI notify handler changed from u32 event IDs to union acpi_object payloads in newer kernels.
 ACPI_HDR := $(KDIR)/include/linux/acpi.h
@@ -34,15 +43,15 @@ ccflags-y += -DHPWMI_HAVE_DEVM_PLATFORM_PROFILE=$(HPWMI_HAVE_DEVM_PLATFORM_PROFI
 
 # Default target
 all:
-	$(MAKE) -C $(KDIR) M=$(PWD) modules
+	$(MAKE) -C $(KDIR) M=$(PWD) $(HPWMI_LLVM) modules
 
 # Clean target
 clean:
-	$(MAKE) -C $(KDIR) M=$(PWD) clean
+	$(MAKE) -C $(KDIR) M=$(PWD) $(HPWMI_LLVM) clean
 	rm -rf *.pkg.tar.zst
 
 install: all
-	$(MAKE) -C $(KDIR) M=$(PWD) modules_install
+	$(MAKE) -C $(KDIR) M=$(PWD) $(HPWMI_LLVM) modules_install
 	depmod -a
 
 install-dkms:
