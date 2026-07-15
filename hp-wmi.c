@@ -1056,7 +1056,7 @@ static struct attribute *hp_wmi_attrs[] = {
 };
 ATTRIBUTE_GROUPS(hp_wmi);
 
-static void hp_wmi_notify(union acpi_object *obj, void *context)
+static void hp_wmi_notify_event(union acpi_object *obj)
 {
 	u32 event_id, event_data;
 	u32 *location;
@@ -1184,6 +1184,28 @@ static void hp_wmi_notify(union acpi_object *obj, void *context)
 		break;
 	}
 }
+
+#if defined(HPWMI_HAVE_U32_WMI_NOTIFY) && (HPWMI_HAVE_U32_WMI_NOTIFY + 0)
+static void hp_wmi_notify(u32 value, void *context)
+{
+	struct acpi_buffer response = { ACPI_ALLOCATE_BUFFER, NULL };
+	acpi_status status;
+
+	status = wmi_get_event_data(value, &response);
+	if (status != AE_OK) {
+		pr_info("bad event status 0x%x\n", status);
+		return;
+	}
+
+	hp_wmi_notify_event(response.pointer);
+	kfree(response.pointer);
+}
+#else
+static void hp_wmi_notify(union acpi_object *obj, void *context)
+{
+	hp_wmi_notify_event(obj);
+}
+#endif
 
 static int __init hp_wmi_input_setup(void)
 {
@@ -2663,7 +2685,7 @@ static int __init hp_wmi_bios_setup(struct platform_device *device)
 	return 0;
 }
 
-static void __exit hp_wmi_bios_remove(struct platform_device *device)
+static void hp_wmi_bios_cleanup(struct platform_device *device)
 {
 	int i;
 
@@ -2691,6 +2713,24 @@ static void __exit hp_wmi_bios_remove(struct platform_device *device)
 		platform_profile_remove();
 #endif
 }
+
+#if defined(HPWMI_HAVE_PLATFORM_DRIVER_REMOVE_NEW) && (HPWMI_HAVE_PLATFORM_DRIVER_REMOVE_NEW + 0)
+static void __exit hp_wmi_bios_remove(struct platform_device *device)
+{
+	hp_wmi_bios_cleanup(device);
+}
+#elif defined(HPWMI_PLATFORM_DRIVER_REMOVE_RETURNS_INT) && (HPWMI_PLATFORM_DRIVER_REMOVE_RETURNS_INT + 0)
+static int __exit hp_wmi_bios_remove(struct platform_device *device)
+{
+	hp_wmi_bios_cleanup(device);
+	return 0;
+}
+#else
+static void __exit hp_wmi_bios_remove(struct platform_device *device)
+{
+	hp_wmi_bios_cleanup(device);
+}
+#endif
 
 static int hp_wmi_resume_handler(struct device *device)
 {
@@ -2746,7 +2786,11 @@ static struct platform_driver hp_wmi_driver __refdata = {
 		.pm = &hp_wmi_pm_ops,
 		.dev_groups = hp_wmi_groups,
 	},
+#if defined(HPWMI_HAVE_PLATFORM_DRIVER_REMOVE_NEW) && (HPWMI_HAVE_PLATFORM_DRIVER_REMOVE_NEW + 0)
+	.remove_new = __exit_p(hp_wmi_bios_remove),
+#else
 	.remove = __exit_p(hp_wmi_bios_remove),
+#endif
 };
 
 static umode_t hp_wmi_hwmon_is_visible(const void *data,
